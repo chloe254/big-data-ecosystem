@@ -27,6 +27,9 @@ Il s'agit d'un pipeline batch complet qui traite **1,9 million de trajets** :
 
 | Lab | Thème | Contenu |
 |---|---|---|
+| [Lab 2](labs/lab2-hdfs-yarn/) | HDFS, YARN, Kerberos | Stockage et réplication (`fsck`), soumission de jobs YARN, WordCount, accès aux interfaces web via Kerberos |
+| [Lab 3](labs/lab3-mapreduce/) | MapReduce en Python | Job Hadoop Streaming enchaîné sur la sortie de WordCount pour trouver le mot le plus fréquent (« the », 13 604 occurrences), testable en local |
+| [Lab 4.1](labs/lab4.1-hive-warehouse/) | Hive Warehouse | Table externe sur un CSV, puis table managée ORC avec des transformations (`split`, `CASE`, typage) |
 | [Lab 4.2](labs/lab4.2-hive-ql/) | Hive Query Language | Requêtes analytiques sur IMDb : expressions régulières, tableaux (`array_contains`), jointures sur 4 tables |
 
 ## 📝 Fiches de synthèse
@@ -35,6 +38,8 @@ Il s'agit d'un pipeline batch complet qui traite **1,9 million de trajets** :
 
 ## 🎯 Compétences mobilisées
 
+- **Cluster Hadoop** : HDFS (blocs, réplication), YARN (soumission et suivi de jobs), sécurité Kerberos.
+- **Traitement distribué** : MapReduce, jobs Hadoop Streaming en Python enchaînés.
 - **Stockage distribué** : HDFS, organisation en zones *raw* et *clean*.
 - **Data warehousing** : tables externes et tables gérées, SerDe CSV, format colonne ORC, CTAS.
 - **SQL analytique** : agrégations, jointures multiples, fonctions de date, expressions régulières, types complexes.
