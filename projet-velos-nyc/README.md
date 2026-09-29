@@ -1,102 +1,54 @@
-# 🚲 Pipeline Big Data : analyse des trajets Citi Bike à New York
+# Analyse des trajets Citi Bike avec Hadoop et Hive
 
-Projet réalisé en binôme avec **Edouard Menut** dans le cadre du cours *Big Data Ecosystem* (ECE Paris).
+Projet du cours Big Data Ecosystem (ECE Paris), fait en binôme avec Edouard Menut.
 
-**Problématique** : comment collecter, stocker, structurer et analyser l'historique des trajets d'un réseau de vélos en libre-service, pour mieux répartir les vélos entre les stations et dimensionner le service ?
+La question de départ : à partir de l'historique des trajets d'un réseau de vélos en libre-service, peut-on voir quelles stations sont les plus utilisées, à quelles heures, et en tirer des idées pour mieux répartir les vélos ?
 
-📄 [Rapport complet (PDF)](rapport_projet.pdf)
+Rapport complet : [rapport_projet.pdf](rapport_projet.pdf)
 
-![Hadoop](https://img.shields.io/badge/Hadoop-HDFS_·_YARN-66CCFF?style=flat&logo=apachehadoop&logoColor=black)
-![Hive](https://img.shields.io/badge/Hive-HiveQL-FDEE21?style=flat&logo=apachehive&logoColor=black)
-![ORC](https://img.shields.io/badge/Format-ORC-555?style=flat)
-![Python](https://img.shields.io/badge/Python-nettoyage-3776AB?style=flat&logo=python&logoColor=white)
+## Pipeline
 
-## 🏗️ Architecture
-
-Il s'agit d'un pipeline **batch** sur un cluster Hadoop, prolongé en bonus par une **architecture hybride** qui simule l'arrivée de nouvelles données.
-
-```mermaid
-flowchart LR
-    A[Données publiques<br/>Citi Bike] --> B[Nettoyage<br/>Python en local]
-    B -->|scp + hdfs dfs -put| C[(HDFS<br/>zone raw)]
-    C --> D[Table externe Hive<br/>bike_trips_ext]
-    D -->|CTAS + filtres| E[Table ORC<br/>bike_trips_clean]
-    E --> F[Analyses HiveQL]
-    L[(HDFS<br/>zone live)] --> M[bike_trips_live_ext] --> N[bike_trips_live_clean]
-    E --> H{{Vue hybride<br/>bike_trips_hybrid}}
-    N --> H
-    H --> F
+```
+CSV Citi Bike -> nettoyage Python (local) -> HDFS (raw) -> table externe Hive -> table ORC nettoyée -> requêtes HiveQL
 ```
 
-| Couche | Rôle |
-|---|---|
-| **Nettoyage local (Python)** | Fusion de deux extractions Citi Bike, suppression des lignes vides, des dates invalides, des durées négatives ou supérieures à 24 h, et des doublons |
-| **HDFS (raw)** | Stockage distribué et persistant du fichier brut (environ 320 Mo) |
-| **Table externe Hive** | Accès SQL au CSV sans le déplacer : les dates restent en `STRING` pour coller fidèlement au fichier source |
-| **Table `clean` (ORC)** | Conversion des horodatages, calcul de la durée en minutes, filtrage. Le format colonne ORC accélère les agrégations |
-| **YARN** | Allocation des ressources du cluster pour l'exécution des requêtes Hive |
-| **Vue hybride** | `UNION ALL` entre l'historique et les nouvelles données, avec une colonne `data_source` pour garder la traçabilité |
+1. Nettoyage en local avec Python. On a fusionné deux extractions Citi Bike, puis supprimé les lignes vides, les dates invalides, les durées négatives ou supérieures à 24 h et les doublons. Il reste environ 1,9 million de trajets (à peu près 320 Mo).
+2. Dépôt du fichier dans HDFS ([01_ingestion_hdfs.sh](sql/01_ingestion_hdfs.sh)).
+3. Création de la table externe `bike_trips_ext` sur le CSV ([02_table_externe.hql](sql/02_table_externe.hql)). Les dates restent en `STRING` à ce stade, pour garder le fichier source tel quel.
+4. Création de la table `bike_trips_clean` au format ORC ([03_table_clean.hql](sql/03_table_clean.hql)) : conversion des dates, calcul de la durée en minutes et filtrage des lignes incohérentes.
+5. Requêtes d'analyse ([04_analyses.hql](sql/04_analyses.hql)).
+6. Bonus ([05_bonus_hybride.hql](sql/05_bonus_hybride.hql)) : un second fichier, déposé dans un autre dossier HDFS, simule de nouvelles données. Il passe par les mêmes étapes, puis la vue `bike_trips_hybrid` réunit les deux sources avec une colonne `data_source`.
 
-## 📂 Scripts
-
-| Fichier | Étape |
-|---|---|
-| [`sql/01_ingestion_hdfs.sh`](sql/01_ingestion_hdfs.sh) | Création de la zone brute et dépôt du CSV dans HDFS |
-| [`sql/02_table_externe.hql`](sql/02_table_externe.hql) | Table externe sur le CSV (OpenCSVSerde) |
-| [`sql/03_table_clean.hql`](sql/03_table_clean.hql) | Table analytique ORC et contrôles qualité |
-| [`sql/04_analyses.hql`](sql/04_analyses.hql) | Requêtes métier : stations, heures de pointe, durée, type de vélo |
-| [`sql/05_bonus_hybride.hql`](sql/05_bonus_hybride.hql) | Ingestion des nouvelles données et vue hybride |
+Les scripts prennent la base et les chemins en variables :
 
 ```bash
 beeline -u "<jdbc-url>" --hivevar db=<base> --hivevar raw_path=<chemin_hdfs>/raw -f sql/02_table_externe.hql
 ```
 
-## 📊 Résultats clés
+## Résultats
 
-**1 886 318 trajets** analysés (historique), puis **3 883 848** au total avec les données simulées.
+Sur les 1 886 318 trajets de l'historique :
 
-| Indicateur | Résultat | Lecture métier |
-|---|---|---|
-| Station la plus utilisée | **W 21 St & 6 Ave** (8 335 départs, 8 309 arrivées) | 9 des 10 stations les plus utilisées au départ le sont aussi à l'arrivée : les usagers rééquilibrent en partie le réseau eux-mêmes |
-| Point d'attention | **Broadway & W 58 St** | Présente dans le top des départs mais pas des arrivées : risque de pénurie, réapprovisionnement à prévoir |
-| Heures de pointe | **8 h – 9 h** et **16 h – 18 h** (pic à 17 h : 165 967 trajets) | Usage majoritairement domicile-travail |
-| Durée moyenne | **≈ 11 minutes** | Trajets courts et urbains |
-| Type de vélo | **64 % électriques** (1 213 279 contre 673 039 classiques) | Augmenter la part de vélos électriques dans les stations les plus sollicitées |
+- Les stations les plus utilisées sont les mêmes au départ et à l'arrivée (9 sur 10 en commun). W 21 St & 6 Ave arrive en tête, avec 8 335 départs et 8 309 arrivées. Les usagers rééquilibrent donc une bonne partie du réseau eux-mêmes. Broadway & W 58 St est dans le top des départs mais pas des arrivées : c'est la station qu'il faudrait surveiller et réapprovisionner.
+- Il y a deux pics d'utilisation, vers 8-9 h et entre 16 h et 18 h (165 967 trajets à 17 h). Les vélos servent surtout pour aller au travail et en revenir.
+- Un trajet dure en moyenne 11 minutes environ.
+- 64 % des trajets sont faits en vélo électrique (1 213 279 contre 673 039 en vélo classique).
 
-<details>
-<summary>Voir les captures des résultats</summary>
+Captures : [stations de départ](resultats/top_stations_depart.png), [stations d'arrivée](resultats/top_stations_arrivee.png), [heures](resultats/heures_de_pointe.png), [types de vélo](resultats/types_de_velo.png), [aperçu de la table clean](resultats/table_clean_apercu.png).
 
-| Top stations de départ | Top stations d'arrivée |
-|---|---|
-| ![](resultats/top_stations_depart.png) | ![](resultats/top_stations_arrivee.png) |
+## Vérifications
 
-| Heures de pointe | Types de vélo |
-|---|---|
-| ![](resultats/heures_de_pointe.png) | ![](resultats/types_de_velo.png) |
+- Le fichier est présent et lisible dans HDFS.
+- La table externe a le bon schéma et l'en-tête est bien ignoré.
+- On retrouve le même nombre de lignes avant et après nettoyage (1 886 318), ce qui est normal puisque le CSV était déjà nettoyé en Python. Il reste 0 ligne avec une valeur nulle ou une durée négative ([capture](resultats/controle_qualite.png)).
+- La vue hybride contient 1 886 318 + 1 997 530 = 3 883 848 lignes ([capture](resultats/hybride_repartition_sources.png)).
 
-**Aperçu de la table nettoyée**
-![](resultats/table_clean_apercu.png)
+## Ce qu'on pourrait améliorer
 
-**Contrôle qualité et vue hybride**
+- Orchestrer les étapes avec Oozie ou Airflow au lieu de les lancer à la main.
+- Partitionner la table ORC par date.
+- Remplacer le faux « flux » par un vrai flux Kafka avec Spark Streaming.
 
-![](resultats/controle_qualite.png) ![](resultats/hybride_repartition_sources.png)
-</details>
+## Données
 
-## ✅ Tests et validation
-
-La validation a été faite à chaque étape du pipeline :
-
-- **Stockage** : présence et lisibilité du fichier dans HDFS (`hdfs dfs -ls`, `-du -h`, `-cat | head`).
-- **Ingestion** : schéma de la table externe (`DESCRIBE`) et en-tête bien ignoré.
-- **Transformation** : même nombre de lignes avant et après nettoyage (1 886 318), ce qui est attendu puisque les données étaient déjà pré-nettoyées. Il reste **0 enregistrement invalide** (valeurs nulles ou durée ≤ 0).
-- **Vue hybride** : 1 886 318 lignes historiques + 1 997 530 lignes simulées = 3 883 848 lignes, avec l'origine de chaque ligne conservée.
-
-## 🔭 Pistes d'amélioration
-
-- Orchestrer les étapes avec **Oozie** ou **Airflow**, pour que le pipeline s'exécute automatiquement dès l'arrivée d'un nouveau fichier.
-- **Partitionner** la table `clean` par date, pour que les requêtes ne lisent que les jours nécessaires.
-- Remplacer la simulation « live » par un vrai flux **Kafka** + **Spark Structured Streaming**.
-
-## 📦 Données
-
-Le jeu de données provient des [données publiques Citi Bike](https://citibikenyc.com/system-data) (New York). Les fichiers CSV (environ 320 Mo) ne sont pas versionnés dans ce dépôt en raison de leur taille.
+Les données viennent de [Citi Bike](https://citibikenyc.com/system-data). Les CSV ne sont pas dans le dépôt, ils sont trop gros.
